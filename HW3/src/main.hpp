@@ -26,7 +26,7 @@ public:
     int x, y, h, w;
     /* Soft module constructor */
     Module(string _name, long long _area)
-        : name(_name), area(_area), fix(false)
+        : name(_name), area(_area), fix(false), x(0), y(0)
     {
         h = w = sqrt(area) + 1;
     }
@@ -37,27 +37,6 @@ public:
     }
 };
 
-// class SoftModule : public Module
-// {
-// public:
-//     long long area;
-//     int x, y;
-//     SoftModule(string _name, long long _area)
-//         : Module(_name), area(_area)
-//     {
-//     }
-// };
-
-// class FixedModule : public Module
-// {
-// public:
-//     int x, y, w, h;
-//     FixedModule(string _name, int _x, int _y, int _w, int _h)
-//         : Module(_name), x(_x), y(_y), w(_w), h(_h)
-//     {
-//     }
-// };
-
 class Net
 {
 public:
@@ -66,16 +45,6 @@ public:
 
     Net(int _m1, int _m2, int _weight)
         : m1(_m1), m2(_m2), weight(_weight)
-    {
-    }
-};
-
-class Segment
-{
-public:
-    int x, y, len;
-    Segment(int _x, int _y, int _len)
-        : x(_x), y(_y), len(_len)
     {
     }
 };
