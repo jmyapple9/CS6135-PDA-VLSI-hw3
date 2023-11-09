@@ -1,4 +1,5 @@
-#include "main.hpp"
+#include "classes.hpp"
+#include "utility.hpp"
 
 ifstream in_file;
 
@@ -45,9 +46,7 @@ void softModuleParser()
     {
         getIss(iss, line);
         iss >> s1 >> name >> area;
-        modules.emplace_back(Module(name, area));
-        moduleNameToId[name] = i;
-        // cout << "softmodule: " << softModules[i].name << " has area " << softModules[i].area << endl;
+        modules.emplace_back(Module(name, area, i));
     }
 }
 
@@ -63,15 +62,11 @@ void fixedModuleParser()
     getIss(iss, line);
     iss >> s1 >> nFixedMod;
     modules.reserve(nFixedMod + nSoftMod);
-    // int FixedModBeginIdx = softModules.size();
-    // int FixedModEndIdx = FixedModBeginIdx + nFixedMod;
     for (int i = nSoftMod; i < nFixedMod + nSoftMod; i++)
     {
         getIss(iss, line);
         iss >> s1 >> name >> x >> y >> w >> h;
-        modules.emplace_back(Module(name, x, y, w, h));
-        moduleNameToId[name] = i;
-        // cout << "FixedModule: " << fixedModeules[i].name << " has x, y, w, h = " << fixedModeules[i].x << ", "<< fixedModeules[i].y << ", "<< fixedModeules[i].w << ", "<< fixedModeules[i].h << endl;
+        modules.emplace_back(Module(name, x, y, w, h, i));
     }
 }
 
@@ -91,10 +86,10 @@ void netParser()
         getIss(iss, line);
         iss >> s1 >> m1_name >> m2_name >> weight;
 
-        int m1 = moduleNameToId[m1_name];
-        int m2 = moduleNameToId[m2_name];
+        // int m1 = moduleNameToId[m1_name];
+        // int m2 = moduleNameToId[m2_name];
 
-        nets.emplace_back(Net(m1, m2, weight));
+        nets.emplace_back(Net(weight, m1_name, m2_name));
     }
 }
 
@@ -120,92 +115,128 @@ void parser(string testcasePath)
     in_file.close();
 }
 
-void check()
-{
-    cout << "Checking softmodules: " << endl;
-    for (int i = 0; i < nSoftMod; i++)
-    {
-        cout << "softmodule: " << modules[i].name << " has area " << modules[i].area << endl;
-    }
-
-    cout << "\nChecking fixedModeules: " << endl;
-    for (int i = nSoftMod; i < nSoftMod + nFixedMod; i++)
-    {
-        cout << "FixedModule: " << modules[i].name << " has x, y, w, h = " << modules[i].x << ", " << modules[i].y << ", " << modules[i].w << ", " << modules[i].h << endl;
-    }
-    cout << "\nChecking nets: " << endl;
-    for (auto &net : nets)
-    {
-        cout << "net: " << modules[net.m1].name
-             << " to " << modules[net.m2].name
-             << " has weight " << net.weight << endl;
-    }
-}
-
-/*
-Return fix module id that overlapping with
- */
-int overlapWithFixed(Module &softMod)
-{
-    int size = modules.size();
-    for (int i = nSoftMod; i < size; i++)
-    {
-        Module &fixMod = modules[i];
-        int xi = softMod.x;
-        int yi = softMod.y;
-        int wi = softMod.w;
-        int hi = softMod.h;
-
-        int xj = fixMod.x;
-        int yj = fixMod.y;
-        int wj = fixMod.w;
-        int hj = fixMod.h;
-
-        if (!(xi + wi <= xj or yi + hi <= yj or xi - wj >= xj or yi - hj >= yj))
-        {
-            // cout << softMod.name << " overlap with " << modules[i].name << endl;
-            return i;
-        }
-    }
-    return 0;
-}
-
-void placeAdjacently(int idx){
-    int fixModID;
-    while (1)
-    {
-        if (fixModID = overlapWithFixed(modules[idx]))
-            modules[idx].x = modules[fixModID].x + modules[fixModID].w;
-        else
-            break;
-    }
-}
-
-void calWirelength()
-{
-    wirelength = 0;
-    for (auto net : nets)
-    {
-        Module &M1 = modules[net.m1];
-        Module &M2 = modules[net.m2];
-        wirelength += abs((M1.x + M1.w / 2) - (M2.x + M2.w / 2)) +
-                      abs((M1.y + M1.h / 2) - (M2.y + M2.h / 2));
-    }
-}
-
 void init_floorplan()
 {
     cout << "init_floorplan" << endl;
 
     modules[0].x = modules[0].y = 0;
-    placeAdjacently(0);
+    placeAdjacently(0, modules, nSoftMod);
 
     for (int i = 1; i < nSoftMod; ++i)
     {
         modules[i].x = modules[i - 1].x + modules[i - 1].w;
-        placeAdjacently(i);
+        placeAdjacently(i, modules, nSoftMod);
     }
-    calWirelength();
+
+    // sort module area in decreasing order
+    sort(modules.begin(), modules.begin() + nSoftMod, compareByArea);
+    for (int i = 0; i < nSoftMod + nFixedMod; i++)
+    {
+        Module &m = modules[i];
+        m.id = moduleNameToId[m.name] = i;
+    }
+    for (auto &n : nets)
+    {
+        n.update(moduleNameToId[n.m1_name], moduleNameToId[n.m2_name]);
+    }
+
+    wirelength = calWirelength(nets, modules);
+
+    while (!allLegal(die, modules, nSoftMod))
+    {
+        double prev_ratio = ratio(modules);
+        int act = rand() % 4;
+        // int act = 3;
+        if (act == 0) // change shape
+        {
+            Module &softMod = modules[rand() % nSoftMod];
+            int prev_w = softMod.w, prev_h = softMod.h;
+            mt19937 gen(1);
+
+            uniform_real_distribution<double> distribution(0.5, 2.0);
+            double step = 0.1;
+            double randomRatio = floor(distribution(gen) / step) * step;
+
+            softMod.h = sqrt(softMod.area / randomRatio) + 1;
+            softMod.w = (softMod.h * randomRatio);
+            if (softMod.w * softMod.h < softMod.area)
+                softMod.w++;
+
+            // bool betterResult = abs((double)die.H / (double)die.W - prev_ratio) >= abs((double)die.H / (double)die.W - ratio());
+            if (legal(softMod, modules, nSoftMod, nSoftMod, die))
+            {
+            }
+            else
+            { // revert
+                softMod.w = prev_w;
+                softMod.h = prev_h;
+            }
+        }
+        else if (act == 1) // swap
+        {
+            int m1 = rand() % nSoftMod;
+            int m2 = rand() % nSoftMod;
+            while (m2 == m1)
+                m2 = rand() % nSoftMod;
+            Module &softMod1 = modules[m1];
+            Module &softMod2 = modules[m2];
+            softMod1.swapCoordinate(softMod2);
+            // bool betterResult = /* rand()%10==0 or */ abs((double)die.H / (double)die.W - prev_ratio) >= abs((double)die.H / (double)die.W - ratio());
+            if (legal(softMod1, modules, nSoftMod, nSoftMod, die) and legal(softMod2, modules, nSoftMod, nSoftMod, die))
+            {
+            }
+            else
+            { // revert
+                softMod1.swapCoordinate(softMod2);
+            }
+        }
+        else if (act == 2) // move
+        {
+        }
+        else // jump
+        {
+            Module &softMod = modules[rand() % nSoftMod];
+            int prev_x = softMod.x, prev_y = softMod.y;
+            softMod.x = rand() % (die.W - softMod.w);
+            softMod.y = rand() % (die.H - softMod.h);
+
+            // bool betterResult = /* rand()%10==0 or */ abs((double)die.H / (double)die.W - prev_ratio) >= abs((double)die.H / (double)die.W - ratio());
+            if (legal(softMod, modules, nSoftMod, nSoftMod, die))
+            {
+            }
+            else
+            { // revert
+                softMod.x = prev_x;
+                softMod.y = prev_y;
+            }
+        }
+    }
+}
+
+void init_floorplan2()
+{
+    // initialize modules position to the outside of die
+    InitializeOutOfBound(modules, nSoftMod, die);
+
+    // sort module area in decreasing order
+    SortModulesByArea(modules, moduleNameToId, nets, nSoftMod);
+    // check(nFixedMod, nSoftMod, modules, nets);
+    TryJumpIntoBox(modules[0], modules, die, nSoftMod, 0);
+    for (int i = 1; i < nSoftMod; i++)
+    {
+        Module &softMod = modules[i];
+        
+        while (!legal(softMod, modules, i, nSoftMod, die))
+        {
+            // perturb modules in fix outline
+            perturbModulesInBox(modules, die, nSoftMod, i); 
+            // try put softMod on
+            TryJumpIntoBox(softMod, modules, die, nSoftMod, i);
+        }
+        cout << "Put module " << i << endl;
+    }
+
+    wirelength = calWirelength(nets, modules);
 }
 
 void SA()
@@ -232,15 +263,21 @@ void output(string outputPath)
     outputfile.close();
 }
 
-
-
 int main(int argc, char *argv[])
 {
+    clock_t start = clock();
+
+    srand(1);
+    // srand(time(0));
     auto [testcasePath, outputPath] = eatArg(argc, argv);
-    parser(testcasePath);    
-    // check();
-    init_floorplan();
+    parser(testcasePath);
+    // check(nFixedMod nSoftMod, modules, nets);
+    // init_floorplan();
+    init_floorplan2();
     SA();
     output(outputPath);
+
+    cout << "-------------------------------" << endl;
+    printf("Total exe Time = %f\n", ((double)(clock() - start)) / CLOCKS_PER_SEC);
     return 0;
 }
