@@ -1,52 +1,47 @@
 #!/bin/bash
+
+# Set the variables
 homeworkName=HW3
 binaryName=hw3
-testcasePool="public1 public2 public3 public4"
 timeLimit=600
+testcasePool="public1 public2 public3 public4"
 
+# Set the directories and paths
 root=$(pwd)
 outputDir=$root/output
 studentDir=$root/student
 testcaseDir=$root/testcase
-verifierBin=$root/verifier/verify
-chmod +x $verifierBin
+verifyBin=$root/verifier/verify
+chmod +x "$verifyBin"
 csvFile=$root/${homeworkName}_grade.csv
 
-function executionCmd() {
-	local argv="$testcaseDir/$1.txt $outputDir/$1.floorplan"
-	local log=$(timeout $timeLimit time -p ./$binaryName $argv 2>&1 >/dev/null)
-	if [[ $log =~ "real " ]] && [[ $log =~ "user " ]] && [[ $log =~ "sys " ]]; then
-		echo "$(echo "$log" | grep real | tail -1 | cut -d ' ' -f 2)"
+# Define the execute function for running tests
+function execute() {
+	if [[ ! -f "$binaryName" ]]; then
+		echo "N/A"
 	else
-		echo "TLE"
+		local log=$(timeout $timeLimit time -p ./$binaryName "$testcaseDir/$1.txt" "$outputDir/$1.floorplan" 2>&1 >/dev/null)
+		if [[ $log =~ "real " && $log =~ "user " && $log =~ "sys " ]]; then
+			echo "$(echo "$log" | grep real | tail -1 | cut -d ' ' -f 2)"
+		else
+			echo "TLE"
+		fi
 	fi
 }
 
-function verifyCmd() {
-	local argv="$testcaseDir/$1.txt $outputDir/$1.floorplan"
-	local log=$($verifierBin $argv | cat)
-	if [[ $log =~ "[Success]" ]]; then
-		echo "success"
-	elif [[ $log =~ "[Error] Wrong Number!" ]]; then
-		echo "$1 has the wrong soft module number."
-	elif [[ $log =~ "[Error] Missing Soft Module!" ]]; then
-		echo "Some soft modules in $1 are missing."
-	elif [[ $log =~ "[Error] Duplicated Soft Module!" ]]; then
-		echo "Some soft modules in $1 are duplicated."
-	elif [[ $log =~ "[Error] Constraint Violated! The area" ]]; then
-		echo "Some soft modules in $1 violate the min area constraint."
-	elif [[ $log =~ "[Error] Constraint Violated! The aspect" ]]; then
-		echo "Some soft modules in $1 violate the aspect ratio constraint."
-	elif [[ $log =~ "is not in the chip boundary" ]]; then
-		echo "Some soft modules in $1 are not in the chip boundary."
-	elif [[ $log =~ "overlaps with soft module" ]]; then
-		echo "Some soft modules in $1 overlap with other soft modules."
-	elif [[ $log =~ "overlaps with fixed module" ]]; then
-		echo "Some soft modules in $1 overlap with other fixed modules.."
-	elif [[ $log =~ "[Error] Wrong Wirelength!" ]]; then
-		echo "$1 has wrong wirelength."
+# Define the verify function for result verification
+function verify() {
+	if [[ ! -s "$outputDir/$1.floorplan" ]]; then
+		echo "The output file of $1 is not found or is empty."
 	else
-		echo "$1 has some errors."
+		local log=$("$verifyBin" "$testcaseDir/$1.txt" "$outputDir/$1.floorplan")
+		if [[ $log =~ "[Error]" ]]; then
+			echo "There is an error in the output results of $1 ($(echo "$log" | grep "[Error]" -m 1))."
+		elif [[ $log =~ "[Success]" ]]; then
+			echo "success"
+		else
+			echo "Something goes wrong when verifying the output results of $1."
+		fi
 	fi
 }
 
@@ -56,53 +51,100 @@ echo "|    This script is used for PDA $homeworkName grading.    |"
 echo "|                                                |"
 echo "|------------------------------------------------|"
 
-csvTitle="student id"
+# Set CSV title
+csvTitle="student id, tar.gz, file structure, readme, makefile, make clean, make"
 for testcase in $testcasePool; do
 	csvTitle="$csvTitle, $testcase wirelength, $testcase runtime"
 done
-echo "$csvTitle, status" >$csvFile
+echo "$csvTitle, status" >"$csvFile"
 
-cd $studentDir/
+# Traverse the student directory for grading
+cd "$studentDir"
 for studentId in *; do
-	if [[ -d $studentId ]]; then
-		printf "grading on %s:\n" $studentId
-		cd $studentId/
-		rm -rf $(find . -mindepth 1 -maxdepth 1 -type d)
-		tar -zxf CS6135_${homeworkName}_$studentId.tar.gz
-		cd $homeworkName/
-
-		cd src/
-		make clean >/dev/null
-		rm -rf ../bin/*
-		make >/dev/null
-		cd ..
-
-		cd bin/
-		rm -rf $outputDir/*
+	if [[ -d "$studentId" ]]; then
+		cd "$studentId"
+		printf "grading on %s:\n" "$studentId"
 		csvContent="$studentId"
-		statusList=""
+
+		# Check various requirements
+		correctTarGz=no
+		correctStruct=no
+		haveReadme=no
+		haveMakefile=no
+		correctMakeClean=no
+		correctMake=no
+		if [[ -f "CS6135_${homeworkName}_$studentId.tar.gz" ]]; then
+			correctTarGz=yes
+			find . -mindepth 1 -maxdepth 1 -type d -exec rm -rf {} +
+			tar -zxf "CS6135_${homeworkName}_$studentId.tar.gz"
+			if [[ -d "$homeworkName/src" && -d "$homeworkName/bin" ]]; then
+				correctStruct=yes
+				cd $homeworkName/src
+				if [[ $(find . -maxdepth 1 -type f -iname README* | wc -l) -eq 1 ]]; then
+					haveReadme=yes
+				fi
+				if [[ $(find . -maxdepth 1 -type f -iname Makefile | wc -l) -eq 1 ]]; then
+					haveMakefile=yes
+					if [[ ! -f "../bin/$binaryName" ]]; then
+						touch "../bin/$binaryName"
+					fi
+					make clean >/dev/null
+					if [[ ! -f "../bin/$binaryName" ]]; then
+						correctMakeClean=yes
+					else
+						rm -f ../bin/$binaryName
+					fi
+					make >/dev/null
+					if [[ -f "../bin/$binaryName" ]]; then
+						correctMake=yes
+					fi
+				fi
+				cd ../bin
+			fi
+		fi
+		printf " checking item          | status\n"
+		echo "------------------------|--------"
+		printf " correct tar.gz         | %s\n" $correctTarGz
+		printf " correct file structure | %s\n" $correctStruct
+		printf " have README            | %s\n" $haveReadme
+		printf " have Makefile          | %s\n" $haveMakefile
+		printf " correct make clean     | %s\n" $correctMakeClean
+		printf " correct make           | %s\n" $correctMake
+		printf "\n"
+		csvContent="$csvContent, $correctTarGz, $correctStruct, $haveReadme"
+		csvContent="$csvContent, $haveMakefile, $correctMakeClean, $correctMake"
+
+		# Verify the program by each testcase
+		rm -rf "$outputDir"/*
 		printf "%10s | %10s | %10s | %s\n" testcase wirelength runtime status
+		echo "-----------|------------|------------|--------"
+		statusList=""
 		for testcase in $testcasePool; do
 			printf "%10s | " $testcase
-			wirelength=fail
-			status="$testcase failed."
-			runtime=$(executionCmd $testcase)
-			if [[ $runtime != "TLE" ]]; then
-				status=$(verifyCmd $testcase)
+			wirelength=N/A
+			runtime=$(execute $testcase)
+			if [[ $runtime == "N/A" ]]; then
+				status="The executable file ($binaryName) is not found."
+				statusList=" $status"
+			elif [[ $runtime == "TLE" ]]; then
+				status="Time out while testing $testcase."
+				statusList="$statusList $status"
+			else
+				status=$(verify $testcase)
 				if [[ $status == "success" ]]; then
-					wirelength=$(cat $outputDir/$testcase.floorplan | grep Wirelength | cut -d ' ' -f 2)
+					wirelength=$(cat "$outputDir/$testcase.floorplan" | grep Wirelength | cut -d ' ' -f 2)
 				else
+					runtime=N/A
 					statusList="$statusList $status"
 				fi
-			else
-				statusList="$statusList $status"
 			fi
 			printf "%10s | %10s | %s\n" $wirelength $runtime "$status"
 			csvContent="$csvContent, $wirelength, $runtime"
 		done
-		echo "$csvContent, $statusList" >>$csvFile
+		printf "\n"
+		echo "$csvContent,$statusList" >>"$csvFile"
 
-		cd $studentDir/
+		cd "$studentDir"
 	fi
 done
 
