@@ -55,7 +55,7 @@ int overlapWithFixed(Module &softMod, vector<Module> &modules, int nSoftMod)
 
 bool outOfBound(Module &softMod, Die &die)
 {
-    return (softMod.x + softMod.w > die.W or softMod.y + softMod.h > die.H);
+    return (softMod.x + softMod.w > die.W or softMod.y + softMod.h > die.H or softMod.x < 0 or softMod.y < 0);
 }
 
 bool legal(Module &softMod, vector<Module> &modules, int beforeIdx, int nSoftMod, Die die)
@@ -153,7 +153,7 @@ void placeAdjacently(int idx, vector<Module> &modules, int nSoftMod)
     }
 }
 
-int calWirelength(vector<Net> &nets, vector<Module> &modules)
+long long calWirelength(vector<Net> &nets, vector<Module> &modules)
 {
     long long wl = 0;
     for (auto net : nets)
