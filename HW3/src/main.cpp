@@ -13,6 +13,8 @@ int revert_x, revert_y, revert_w, revert_h, revert_m1, revert_m2, actDir;
 vector<Module> modules;
 vector<Module> bestModules;
 vector<Net> nets;
+chrono::system_clock::time_point start_time;
+chrono::system_clock::time_point end_time;
 
 pair<string, string> eatArg(int argc, char *argv[])
 {
@@ -150,6 +152,7 @@ void perturb(int act)
     bool takeAction = false;
     while (!takeAction)
     {
+    if(std::chrono::system_clock::now() >= end_time) return;
         if (act == 0) // change shape
         {
             revert_m1 = rand() % nSoftMod;
@@ -234,11 +237,7 @@ void perturb(int act)
                     softMod.y = revert_y;
                 break;
             case 1: // move down
-                do
-                {
-                    softMod.y -= rand() % 10 + 1;
-                } while (softMod.y < 0);
-
+                softMod.y -= rand() % 10 + 1;
                 if (legal(softMod, modules, nSoftMod, nSoftMod, die))
                     takeAction = true;
                 else
@@ -252,11 +251,7 @@ void perturb(int act)
                     softMod.x = revert_x;
                 break;
             case 3: // move left
-                do
-                {
-                    softMod.x -= rand() % 10 + 1;
-                } while (softMod.x < 0);
-
+                softMod.x -= rand() % 10 + 1;
                 if (legal(softMod, modules, nSoftMod, nSoftMod, die))
                     takeAction = true;
                 else
@@ -317,8 +312,8 @@ void revert(int act)
 void SA()
 {
     baselineWL = originWL / 600000;
-    double reject, reduceRatio = 0.99;
-    int nAns, uphill, T = 100000, N = 10; // N: number of answer in T
+    double reject, reduceRatio = 0.9999;
+    int nAns, uphill, T = 1000000000, N = 70; // N: number of answer in T
     bestModules = modules;
 
     do
@@ -327,7 +322,7 @@ void SA()
 
         while (uphill < N and nAns < 2 * N)
         {
-            int act = rand() % 3;
+            int act = rand() % 4;
             perturb(act);
             ++nAns;
             perturbWL = calWirelength(nets, modules);
@@ -353,9 +348,9 @@ void SA()
         }
 
         T *= reduceRatio;
-        cout << "T: " << T << ", bestWL: " << bestWL << endl;
+        if(T%10000==0) cout << "T: " << T << ", bestWL: " << bestWL << endl;
         // if(T==15381) break;
-    } while (reject / nAns <= 0.95 and T > 100);
+    } while (reject / nAns <= 0.95 and T > 10);
 }
 
 void output(string outputPath)
@@ -380,19 +375,26 @@ void output(string outputPath)
 
 int main(int argc, char *argv[])
 {
-    clock_t start = clock();
+    std::chrono::duration<int, std::ratio<60>> minutes(9);
+    std::chrono::duration<int> seconds(40);
+    start_time = chrono::system_clock::now();
+    end_time = start_time + minutes + seconds;
 
+    // clock_t start = clock();
+    auto start = chrono::system_clock::now();
     srand(1);
     // srand(time(0));
     auto [testcasePath, outputPath] = eatArg(argc, argv);
     parser(testcasePath);
     // check(nFixedMod nSoftMod, modules, nets);
-    // init_floorplan2();
     init_floorplan();
+    // auto floorplanTime = chrono::system_clock::now();
     SA();
     output(outputPath);
 
     cout << "-------------------------------" << endl;
-    printf("Total exe Time = %f\n", ((double)(clock() - start)) / CLOCKS_PER_SEC);
+    auto realDuration = chrono::duration_cast<chrono::seconds>(chrono::system_clock::now() - start_time);
+    cout << "Real duration: " << realDuration.count() << " seconds." << endl;
+    // printf("Total exe Time = %f\n", ((double)(clock() - start)) / CLOCKS_PER_SEC);
     return 0;
 }
