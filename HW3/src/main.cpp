@@ -150,6 +150,92 @@ bool init_floorplan()
     return false;
 }
 
+bool init_floorplan2()
+{
+    InitializeOutOfBound(modules, nSoftMod, die);
+    SortModulesByArea(modules, moduleNameToId, nets, nSoftMod);
+    double step = 0.1;
+    for (int softIdx = 0; softIdx < nSoftMod; ++softIdx)
+    {
+        bool placed = false;
+        Module &softMod = modules[softIdx];
+        // for (double r = 0.5 ; r  <= 2; r += step) // start with flat shape, gradually becomes thin
+        for (double r = 2; r >= 0.499; r -= step) // start with flat shape, gradually becomes thin
+        {
+            // softMod.r -= step;
+            softMod.h = sqrt(softMod.area / r) + 1;
+            softMod.w = (softMod.h * r);
+            if (softMod.w * softMod.h < softMod.area)
+                softMod.w++;
+            // if(softIdx==0)
+                cout << "putting mod " << softIdx << " with shape r = " << r << endl;
+            for (int y = 0; y < die.H - softMod.h; ++y) // from left to right, from bottom to top
+            {
+                // if(r==0.6 && softIdx==15)
+                //     cout << "y = " << y << ", ";
+                softMod.y = y;
+                for (int x = 0; x < die.W - softMod.w; ++x)
+                {
+                    // if(r==0.6 && softIdx==15)
+                    //     cout << "x = " << x << ", ";
+                    softMod.x = x;
+                    int onFixed = overlapWithFixed(softMod, modules, nSoftMod);
+                    if (onFixed != -1)
+                    {
+                        // cout << "Module " << softIdx << " is overlap with fix mod at " << x << ", " << y << endl;
+                        Module &overlap = modules[onFixed];
+                        x = overlap.x + overlap.w - 1;
+                        if (x >= die.W - softMod.w)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    int onSoft = overlapWithSoft(softMod, modules, nSoftMod);
+                    if (onSoft != -1)
+                    {
+                        Module &overlap = modules[onSoft];
+                        x = overlap.x + overlap.w - 1;
+                        if (x >= die.W - softMod.w)
+                        {
+                            break;
+                        }
+                        continue;
+                    }
+                    placed = true;
+                    // cout << "Put module " << softIdx << endl;
+                    break;
+                }
+                if (placed)
+                    break;
+            }
+            if (placed)
+                break;
+        }
+        if (!placed)
+        {
+            cout << "fail to put " << softIdx << " with all shapes, InitializeOutOfBound()" << endl;
+            InitializeOutOfBound(modules, nSoftMod, die);
+            softIdx = -1;
+        }
+    }
+
+    for (int softIdx = 0; softIdx < nSoftMod; ++softIdx)
+    {
+        Module &softMod = modules[softIdx];
+        if (!legal(softMod, modules, nSoftMod, nSoftMod, die))
+        {
+            // cout << "Module " << softIdx << " is invalid !" << endl;
+            cout << "Module " << softIdx << ": " << softMod.x << ", " << softMod.y << endl;
+        }
+    }
+    originWL = calWirelength(nets, modules);
+    // don't need to check each modules respectively
+    // just simply check if the smallest module is in bound or not.
+    return !outOfBound(modules[nSoftMod - 1], die);
+}
+
 bool perturb(int act)
 {
     // cout << "perturbing..." << endl;
@@ -160,13 +246,12 @@ bool perturb(int act)
             return true;
         int cnt = 0;
 
-        if (act == 0 or cnt++ == 10000) // change shape
+        if (act == 0 or cnt++ == 10000) // reshape
         {
             revert_m1 = rand() % nSoftMod;
             Module &softMod = modules[revert_m1];
             revert_w = softMod.w, revert_h = softMod.h;
             mt19937 gen(1);
-
             uniform_real_distribution<double> distribution(0.5, 2.0);
             double step = 0.1;
             double randomRatio = floor(distribution(gen) / step) * step;
@@ -176,7 +261,6 @@ bool perturb(int act)
             if (softMod.w * softMod.h < softMod.area)
                 softMod.w++;
 
-            // bool betterResult = abs((double)die.H / (double)die.W - revert_ratio) >= abs((double)die.H / (double)die.W - ratio());
             if (legal(softMod, modules, nSoftMod, nSoftMod, die))
             {
                 takeAction = true;
@@ -200,7 +284,6 @@ bool perturb(int act)
             Module &softMod1 = modules[revert_m1];
             Module &softMod2 = modules[revert_m2];
             softMod1.swapCoordinate(softMod2);
-            // bool betterResult = /* rand()%10==0 or */ abs((double)die.H / (double)die.W - prev_ratio) >= abs((double)die.H / (double)die.W - ratio());
             if (legal(softMod1, modules, nSoftMod, nSoftMod, die) and legal(softMod2, modules, nSoftMod, nSoftMod, die))
             {
                 takeAction = true;
@@ -217,7 +300,6 @@ bool perturb(int act)
             revert_x = softMod.x, revert_y = softMod.y;
             softMod.x = rand() % (die.W - softMod.w);
             softMod.y = rand() % (die.H - softMod.h);
-            // bool betterResult = /* rand()%10==0 or */ abs((double)die.H / (double)die.W - prev_ratio) >= abs((double)die.H / (double)die.W - ratio());
             if (legal(softMod, modules, nSoftMod, nSoftMod, die))
             {
                 takeAction = true;
@@ -365,7 +447,7 @@ bool SA()
         if (T % 10000 == 0)
             cout << "T: " << T << ", bestWL: " << bestWL << endl;
     } while (reject / nAns <= 0.95 and T > 10);
-
+    // cout << "Done SA" << endl;
     return false;
 }
 
@@ -413,7 +495,8 @@ int main(int argc, char *argv[])
         auto realDuration = chrono::duration_cast<chrono::seconds>(chrono::system_clock::now() - start_time);
         cout << "iteration duration: " << realDuration.count() << " seconds." << endl << endl;
     } */
-    init_floorplan();
+    // init_floorplan();
+    init_floorplan2();
     SA();
     output(outputPath);
 
